@@ -18,7 +18,7 @@ if _env.exists():
             import os; os.environ.setdefault(k.strip(), v.strip())
 
 from config import APPS
-from checkers import dart_info, sajunow, yeouido, n2golf
+from checkers import dart_info, sajunow, yeouido, n2golf, generic
 from reporters.report import build_report
 from reporters.slack import send_slack
 
@@ -26,8 +26,11 @@ from reporters.slack import send_slack
 CHECKER_MAP = {
     "Dart Info": dart_info,
     "사주나우": sajunow,
-    "여의도맛집": yeouido,
+    "여의도 한끼": yeouido,
     "N2골프": n2golf,
+    "대만맛집": generic,
+    "makedocu": generic,
+    "HNW아카이브": generic,
 }
 
 

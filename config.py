@@ -23,12 +23,24 @@ APPS: list[AppConfig] = [
         base_url=os.getenv("SAJUNOW_URL", "https://saju-now.vercel.app"),
     ),
     AppConfig(
-        name="여의도맛집",
+        name="여의도 한끼",
         base_url=os.getenv("YEOUIDO_URL", "https://yeouido-food.vercel.app"),
     ),
     AppConfig(
         name="N2골프",
         base_url=os.getenv("N2GOLF_URL", "https://n2golf.vercel.app"),
+    ),
+    AppConfig(
+        name="대만맛집",
+        base_url=os.getenv("TAIWAN_URL", "https://taiwan-food-nextjs.vercel.app"),
+    ),
+    AppConfig(
+        name="makedocu",
+        base_url=os.getenv("MAKEDOCU_URL", "https://makedocu.vercel.app"),
+    ),
+    AppConfig(
+        name="HNW아카이브",
+        base_url=os.getenv("HNW_URL", "https://hnw-archive.vercel.app"),
     ),
 ]
 
