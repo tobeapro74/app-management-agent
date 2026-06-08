@@ -19,7 +19,9 @@ def build_report(results: list[CheckResult]) -> str:
             lines.append(f"  🔴 {e}")
 
         # 핵심 지표만 표시
-        SHOW_KEYS = ("restaurant_count", "monthly_bookings", "last_cron_run", "unpublished_commits")
+        SHOW_KEYS = ("restaurant_count", "restaurant_count_diff", "monthly_bookings",
+                     "last_cron_run", "cron_opened_count", "unpublished_commits",
+                     "last_poll_at", "disclosures_total")
         for k in SHOW_KEYS:
             if k in r.details:
                 lines.append(f"  - {k}: {r.details[k]}")
