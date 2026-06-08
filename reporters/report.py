@@ -20,6 +20,7 @@ def build_report(results: list[CheckResult]) -> str:
 
         # 핵심 지표만 표시
         SHOW_KEYS = ("restaurant_count", "restaurant_count_diff", "monthly_bookings",
+                     "total_members", "dau_yesterday", "new_members_yesterday",
                      "last_cron_run", "cron_opened_count", "unpublished_commits",
                      "last_poll_at", "disclosures_total")
         for k in SHOW_KEYS:
