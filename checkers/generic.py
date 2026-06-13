@@ -4,7 +4,7 @@ from config import AppConfig
 
 async def check(app: AppConfig) -> CheckResult:
     ok, ms, body = await ping_health(app.health_url)
-    result = CheckResult(app_name=app.name, response_ms=ms, details=body)
+    result = CheckResult(app_name=app.name, status="ok", response_ms=ms)
 
     if not ok:
         result.status = "error"
