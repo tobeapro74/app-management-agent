@@ -83,6 +83,32 @@ def get_history(app_name: str, limit: int = 30) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def get_availability(days: int = 7) -> list[dict]:
+    """최근 N일 앱별 가용성(ok 비율) + 평균 응답속도 반환."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT
+                app_name,
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_count,
+                ROUND(AVG(CASE WHEN response_ms IS NOT NULL THEN response_ms END), 0) AS avg_ms
+               FROM check_history
+               WHERE checked_at >= datetime('now', ? || ' days')
+               GROUP BY app_name""",
+            (f"-{days}",),
+        ).fetchall()
+    return [
+        {
+            "app_name": r["app_name"],
+            "total": r["total"],
+            "ok_count": r["ok_count"],
+            "availability": round(r["ok_count"] / r["total"] * 100, 1) if r["total"] else 0,
+            "avg_ms": int(r["avg_ms"]) if r["avg_ms"] else None,
+        }
+        for r in rows
+    ]
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["details"] = json.loads(d["details"] or "{}")

@@ -39,7 +39,7 @@ from checkers import dart_link as dart_link_checker
 from reporters.report import build_report
 from reporters.slack import send_slack
 from checkers.base import CheckResult
-from api.database import init_db, save_results, get_latest, get_history
+from api.database import init_db, save_results, get_latest, get_history, get_availability
 
 CHECKER_MAP = {
     "Dart Link": dart_link_checker,
@@ -101,6 +101,12 @@ def history(app_name: str, limit: int = 30):
     if not rows:
         raise HTTPException(404, f"'{app_name}' 점검 이력 없음")
     return rows
+
+
+@app.get("/api/availability")
+def availability(days: int = 7):
+    """최근 N일 앱별 가용성(ok 비율) + 평균 응답속도."""
+    return get_availability(days)
 
 
 @app.post("/api/run")

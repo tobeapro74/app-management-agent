@@ -3,44 +3,49 @@
 import { useState } from "react";
 import { AppStatus, RecheckResult, recheckApp } from "@/lib/api";
 import { CheckCircle, AlertTriangle, XCircle, Clock, RefreshCw, Copy } from "lucide-react";
+import ArcGauge from "./ArcGauge";
 
 const STATUS_CONFIG = {
-  ok: { icon: CheckCircle, color: "text-emerald-500", bg: "bg-emerald-50 border-emerald-200", label: "정상" },
-  warn: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-50 border-amber-200", label: "경고" },
-  error: { icon: XCircle, color: "text-red-500", bg: "bg-red-50 border-red-200", label: "오류" },
+  ok:    { icon: CheckCircle,    color: "text-emerald-500", bg: "bg-emerald-50 border-emerald-200",  label: "정상" },
+  warn:  { icon: AlertTriangle,  color: "text-amber-500",   bg: "bg-amber-50 border-amber-200",      label: "경고" },
+  error: { icon: XCircle,        color: "text-red-500",     bg: "bg-red-50 border-red-200",          label: "오류" },
 };
 
 const DETAIL_LABELS: Record<string, string> = {
-  total_members: "누적회원",
-  dau_yesterday: "전일DAU",
-  wau_yesterday: "전주WAU",
-  mau_yesterday: "전월MAU",
-  new_members_yesterday: "신규가입",
-  restaurant_count: "맛집수",
-  monthly_bookings: "월예약",
-  last_cron_run: "크론실행",
-  unpublished_commits: "미배포커밋",
-  last_poll_at: "최근수집",
-  disclosures_total: "공시누적",
-  disclosure_found: "당일공시",
-  financial_ok: "재무수집",
-  ai_ok: "AI분석",
+  total_members:        "누적회원",
+  dau_yesterday:        "전일DAU",
+  wau_yesterday:        "전주WAU",
+  mau_yesterday:        "전월MAU",
+  new_members_yesterday:"신규가입",
+  restaurant_count:     "맛집수",
+  monthly_bookings:     "월예약",
+  last_cron_run:        "크론실행",
+  unpublished_commits:  "미배포커밋",
+  last_poll_at:         "최근수집",
+  disclosures_total:    "공시누적",
+  disclosure_found:     "당일공시",
+  financial_ok:         "재무수집",
+  ai_ok:                "AI분석",
 };
 
-function SslBadge({ days }: { days: number }) {
-  if (days < 14) return <span className="text-xs font-medium text-red-600">🔴 SSL {days}일</span>;
-  if (days < 30) return <span className="text-xs font-medium text-amber-600">⚠️ SSL {days}일</span>;
-  return <span className="text-xs text-slate-400">🔒 SSL {days}일</span>;
+// 응답속도 → 0~100 게이지 값 변환 (5000ms = 100%)
+const MS_MAX = 5000;
+function msToGaugeValue(ms: number) {
+  return Math.min(100, (ms / MS_MAX) * 100);
+}
+
+// SSL 잔여일 → 게이지 값 (90일 기준 100%)
+const SSL_MAX = 90;
+function sslToGaugeValue(days: number) {
+  return Math.min(100, (days / SSL_MAX) * 100);
 }
 
 function hasSlowResponse(s: AppStatus) {
   return s.warnings.some(w => w.includes("응답 지연"));
 }
-
 function hasHealthError(s: AppStatus) {
   return s.status === "error";
 }
-
 function hasSslWarning(s: AppStatus) {
   const days = s.details?.ssl_days as number | undefined;
   return days != null && days < 30;
@@ -48,19 +53,21 @@ function hasSslWarning(s: AppStatus) {
 
 export default function AppCard({
   s,
+  availability,
   onRecheckDone,
 }: {
   s: AppStatus;
+  availability?: number | null;  // 0~100, 최근 7일 ok 비율
   onRecheckDone?: (result: RecheckResult) => void;
 }) {
-  const [rechecking, setRechecking] = useState(false);
+  const [rechecking, setRechecking]       = useState(false);
   const [recheckResult, setRecheckResult] = useState<RecheckResult | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]               = useState(false);
 
-  const display = recheckResult ?? s;
-  const cfg = STATUS_CONFIG[display.status] ?? STATUS_CONFIG.error;
-  const Icon = cfg.icon;
-  const sslDays = display.details?.ssl_days as number | undefined;
+  const display  = recheckResult ?? s;
+  const cfg      = STATUS_CONFIG[display.status] ?? STATUS_CONFIG.error;
+  const Icon     = cfg.icon;
+  const sslDays  = display.details?.ssl_days as number | undefined;
   const checkedAt = display.checked_at
     ? new Date(display.checked_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
     : "-";
@@ -78,20 +85,23 @@ export default function AppCard({
       const res = await recheckApp(s.app_name);
       setRecheckResult(res);
       onRecheckDone?.(res);
-    } catch {
-      // 실패 시 원래 상태 유지
-    } finally {
+    } catch { /* 원래 상태 유지 */ } finally {
       setRechecking(false);
     }
   }
 
   function handleCopySsl() {
-    const hostname = s.app_name.toLowerCase().replace(/\s/g, "-");
-    const cmd = `# SSL 갱신 가이드 — ${s.app_name}\n# Vercel/Railway는 자동 갱신됩니다.\n# 만료 이전에 재배포하거나 대시보드에서 도메인 재인증을 시도하세요.\n# 도메인: ${hostname}`;
+    const cmd = `# SSL 갱신 가이드 — ${s.app_name}\n# Vercel/Railway 자동 갱신 앱은 재배포 또는 대시보드에서 도메인 재인증을 시도하세요.`;
     navigator.clipboard.writeText(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  // 게이지 표시 여부
+  const showMsGauge  = display.response_ms != null;
+  const showSslGauge = sslDays != null;
+  const showAvailGauge = availability != null;
+  const showGaugeRow = showMsGauge || showSslGauge || showAvailGauge;
 
   return (
     <div className={`rounded-xl border p-4 flex flex-col gap-3 ${cfg.bg}`}>
@@ -106,16 +116,40 @@ export default function AppCard({
         </span>
       </div>
 
-      {/* 응답속도 + SSL */}
-      <div className="flex items-center gap-3 text-sm text-slate-500">
-        {display.response_ms != null && (
-          <span className="flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" />
-            {display.response_ms}ms
-          </span>
-        )}
-        {sslDays != null && <SslBadge days={sslDays} />}
-      </div>
+      {/* 게이지 행 */}
+      {showGaugeRow && (
+        <div className="flex justify-around items-end border-b border-current/10 pb-2">
+          {showMsGauge && (
+            <ArcGauge
+              value={msToGaugeValue(display.response_ms!)}
+              label="응답속도"
+              displayValue={`${display.response_ms}ms`}
+              thresholds={[60, 80]}  // 3000ms=60%, 4000ms=80%
+              size={100}
+            />
+          )}
+          {showSslGauge && (
+            <ArcGauge
+              value={sslToGaugeValue(sslDays!)}
+              label="SSL 잔여"
+              displayValue={`${sslDays}일`}
+              thresholds={[34, 16]}
+              invert
+              size={100}
+            />
+          )}
+          {showAvailGauge && (
+            <ArcGauge
+              value={availability!}
+              label="7일 가용성"
+              unit="%"
+              thresholds={[90, 70]}
+              invert
+              size={100}
+            />
+          )}
+        </div>
+      )}
 
       {/* 경고/에러 메시지 */}
       {display.warnings.length > 0 && (
@@ -132,9 +166,7 @@ export default function AppCard({
       {/* warm-up 결과 배너 */}
       {recheckResult && (
         <div className={`text-xs rounded-lg px-3 py-2 font-medium ${
-          recheckResult.resolved
-            ? "bg-emerald-100 text-emerald-700"
-            : "bg-amber-100 text-amber-700"
+          recheckResult.resolved ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
         }`}>
           {recheckResult.resolved
             ? `✅ 재점검 후 정상 (${recheckResult.response_ms}ms, ${recheckResult.attempts}회 시도)`

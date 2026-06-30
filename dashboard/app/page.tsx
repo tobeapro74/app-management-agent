@@ -1,26 +1,33 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchStatus, triggerRun, AppStatus, RecheckResult } from "@/lib/api";
+import { fetchStatus, fetchAvailability, triggerRun, AppStatus, RecheckResult, AvailabilityRow } from "@/lib/api";
 import AppCard from "@/components/AppCard";
 import { RefreshCw, Play } from "lucide-react";
 
 const REFRESH_INTERVAL = 60_000;
 
 export default function Dashboard() {
-  const [statuses, setStatuses] = useState<AppStatus[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [statuses, setStatuses]       = useState<AppStatus[]>([]);
+  const [availMap, setAvailMap]       = useState<Record<string, number>>({});
+  const [loading, setLoading]         = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [running, setRunning] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [running, setRunning]         = useState(false);
+  const [toast, setToast]             = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchStatus();
+      const [data, avail] = await Promise.all([
+        fetchStatus(),
+        fetchAvailability(7),
+      ]);
       setStatuses(data);
+      const map: Record<string, number> = {};
+      avail.forEach((r: AvailabilityRow) => { map[r.app_name] = r.availability; });
+      setAvailMap(map);
       setLastRefresh(new Date());
     } catch {
-      // 이력 없으면 빈 배열 유지
+      // 이력 없으면 유지
     } finally {
       setLoading(false);
     }
@@ -55,8 +62,8 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 5000);
   }
 
-  const okCount = statuses.filter(s => s.status === "ok").length;
-  const warnCount = statuses.filter(s => s.status === "warn").length;
+  const okCount    = statuses.filter(s => s.status === "ok").length;
+  const warnCount  = statuses.filter(s => s.status === "warn").length;
   const errorCount = statuses.filter(s => s.status === "error").length;
 
   return (
@@ -121,7 +128,7 @@ export default function Dashboard() {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-40 rounded-xl bg-slate-200 animate-pulse" />
+              <div key={i} className="h-56 rounded-xl bg-slate-200 animate-pulse" />
             ))}
           </div>
         ) : statuses.length === 0 ? (
@@ -131,7 +138,14 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {statuses.map(s => <AppCard key={s.app_name} s={s} onRecheckDone={handleRecheckDone} />)}
+            {statuses.map(s => (
+              <AppCard
+                key={s.app_name}
+                s={s}
+                availability={availMap[s.app_name] ?? null}
+                onRecheckDone={handleRecheckDone}
+              />
+            ))}
           </div>
         )}
       </div>

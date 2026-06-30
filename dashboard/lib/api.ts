@@ -17,6 +17,14 @@ export interface RecheckResult extends AppStatus {
   resolved: boolean;
 }
 
+export interface AvailabilityRow {
+  app_name: string;
+  total: number;
+  ok_count: number;
+  availability: number;  // 0~100
+  avg_ms: number | null;
+}
+
 export interface AppMeta {
   name: string;
   base_url: string;
@@ -33,6 +41,12 @@ export async function fetchHistory(appName: string, limit = 30): Promise<AppStat
     `${API_BASE}/api/history/${encodeURIComponent(appName)}?limit=${limit}`,
     { cache: "no-store" }
   );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchAvailability(days = 7): Promise<AvailabilityRow[]> {
+  const res = await fetch(`${API_BASE}/api/availability?days=${days}`, { cache: "no-store" });
   if (!res.ok) return [];
   return res.json();
 }
