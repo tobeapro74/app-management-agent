@@ -11,6 +11,12 @@ export interface AppStatus {
   checked_at: string;
 }
 
+export interface RecheckResult extends AppStatus {
+  attempts: number;
+  response_times: number[];
+  resolved: boolean;
+}
+
 export interface AppMeta {
   name: string;
   base_url: string;
@@ -39,5 +45,11 @@ export async function fetchApps(): Promise<AppMeta[]> {
 
 export async function triggerRun(notifySlack = false): Promise<{ status: string; message: string }> {
   const res = await fetch(`${API_BASE}/api/run?notify_slack=${notifySlack}`, { method: "POST" });
+  return res.json();
+}
+
+export async function recheckApp(appName: string): Promise<RecheckResult> {
+  const res = await fetch(`${API_BASE}/api/recheck/${encodeURIComponent(appName)}`, { method: "POST" });
+  if (!res.ok) throw new Error(`recheck failed: ${res.status}`);
   return res.json();
 }

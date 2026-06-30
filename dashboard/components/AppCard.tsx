@@ -1,7 +1,8 @@
 "use client";
 
-import { AppStatus } from "@/lib/api";
-import { CheckCircle, AlertTriangle, XCircle, Clock } from "lucide-react";
+import { useState } from "react";
+import { AppStatus, RecheckResult, recheckApp } from "@/lib/api";
+import { CheckCircle, AlertTriangle, XCircle, Clock, RefreshCw, Copy } from "lucide-react";
 
 const STATUS_CONFIG = {
   ok: { icon: CheckCircle, color: "text-emerald-500", bg: "bg-emerald-50 border-emerald-200", label: "정상" },
@@ -32,15 +33,65 @@ function SslBadge({ days }: { days: number }) {
   return <span className="text-xs text-slate-400">🔒 SSL {days}일</span>;
 }
 
-export default function AppCard({ s }: { s: AppStatus }) {
-  const cfg = STATUS_CONFIG[s.status] ?? STATUS_CONFIG.error;
-  const Icon = cfg.icon;
-  const sslDays = s.details?.ssl_days as number | undefined;
-  const checkedAt = s.checked_at ? new Date(s.checked_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "-";
+function hasSlowResponse(s: AppStatus) {
+  return s.warnings.some(w => w.includes("응답 지연"));
+}
 
-  const metricEntries = Object.entries(s.details ?? {}).filter(
+function hasHealthError(s: AppStatus) {
+  return s.status === "error";
+}
+
+function hasSslWarning(s: AppStatus) {
+  const days = s.details?.ssl_days as number | undefined;
+  return days != null && days < 30;
+}
+
+export default function AppCard({
+  s,
+  onRecheckDone,
+}: {
+  s: AppStatus;
+  onRecheckDone?: (result: RecheckResult) => void;
+}) {
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckResult, setRecheckResult] = useState<RecheckResult | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const display = recheckResult ?? s;
+  const cfg = STATUS_CONFIG[display.status] ?? STATUS_CONFIG.error;
+  const Icon = cfg.icon;
+  const sslDays = display.details?.ssl_days as number | undefined;
+  const checkedAt = display.checked_at
+    ? new Date(display.checked_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
+    : "-";
+
+  const metricEntries = Object.entries(display.details ?? {}).filter(
     ([k]) => k !== "ssl_days" && k !== "companies" && k !== "disclosure_date" && DETAIL_LABELS[k]
   );
+
+  const needsAction = hasSlowResponse(s) || hasHealthError(s) || hasSslWarning(s);
+
+  async function handleWarmup() {
+    setRechecking(true);
+    setRecheckResult(null);
+    try {
+      const res = await recheckApp(s.app_name);
+      setRecheckResult(res);
+      onRecheckDone?.(res);
+    } catch {
+      // 실패 시 원래 상태 유지
+    } finally {
+      setRechecking(false);
+    }
+  }
+
+  function handleCopySsl() {
+    const hostname = s.app_name.toLowerCase().replace(/\s/g, "-");
+    const cmd = `# SSL 갱신 가이드 — ${s.app_name}\n# Vercel/Railway는 자동 갱신됩니다.\n# 만료 이전에 재배포하거나 대시보드에서 도메인 재인증을 시도하세요.\n# 도메인: ${hostname}`;
+    navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <div className={`rounded-xl border p-4 flex flex-col gap-3 ${cfg.bg}`}>
@@ -57,25 +108,43 @@ export default function AppCard({ s }: { s: AppStatus }) {
 
       {/* 응답속도 + SSL */}
       <div className="flex items-center gap-3 text-sm text-slate-500">
-        {s.response_ms != null && (
+        {display.response_ms != null && (
           <span className="flex items-center gap-1">
             <Clock className="w-3.5 h-3.5" />
-            {s.response_ms}ms
+            {display.response_ms}ms
           </span>
         )}
         {sslDays != null && <SslBadge days={sslDays} />}
       </div>
 
       {/* 경고/에러 메시지 */}
-      {s.warnings.length > 0 && (
+      {display.warnings.length > 0 && (
         <ul className="text-xs text-amber-700 space-y-0.5">
-          {s.warnings.map((w, i) => <li key={i}>⚡ {w}</li>)}
+          {display.warnings.map((w, i) => <li key={i}>⚡ {w}</li>)}
         </ul>
       )}
-      {s.errors.length > 0 && (
+      {display.errors.length > 0 && (
         <ul className="text-xs text-red-700 space-y-0.5">
-          {s.errors.map((e, i) => <li key={i}>🔴 {e}</li>)}
+          {display.errors.map((e, i) => <li key={i}>🔴 {e}</li>)}
         </ul>
+      )}
+
+      {/* warm-up 결과 배너 */}
+      {recheckResult && (
+        <div className={`text-xs rounded-lg px-3 py-2 font-medium ${
+          recheckResult.resolved
+            ? "bg-emerald-100 text-emerald-700"
+            : "bg-amber-100 text-amber-700"
+        }`}>
+          {recheckResult.resolved
+            ? `✅ 재점검 후 정상 (${recheckResult.response_ms}ms, ${recheckResult.attempts}회 시도)`
+            : `⚠️ 재점검에도 ${recheckResult.status} — 실제 장애일 수 있습니다`}
+          {recheckResult.response_times.length > 1 && (
+            <span className="ml-1 text-slate-500">
+              [{recheckResult.response_times.map(t => `${t}ms`).join(" → ")}]
+            </span>
+          )}
+        </div>
       )}
 
       {/* 핵심 지표 */}
@@ -88,6 +157,31 @@ export default function AppCard({ s }: { s: AppStatus }) {
             </div>
           ))}
         </dl>
+      )}
+
+      {/* 조치 버튼 */}
+      {needsAction && (
+        <div className="flex flex-wrap gap-2 border-t border-current/10 pt-2">
+          {(hasSlowResponse(s) || hasHealthError(s)) && (
+            <button
+              onClick={handleWarmup}
+              disabled={rechecking}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 disabled:opacity-50 font-medium"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${rechecking ? "animate-spin" : ""}`} />
+              {rechecking ? "재점검 중…" : "Warm-up 재점검"}
+            </button>
+          )}
+          {hasSslWarning(s) && (
+            <button
+              onClick={handleCopySsl}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {copied ? "복사됨 ✓" : "SSL 갱신 가이드"}
+            </button>
+          )}
+        </div>
       )}
 
       {/* 점검 시각 */}

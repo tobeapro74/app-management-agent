@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchStatus, triggerRun, AppStatus } from "@/lib/api";
+import { fetchStatus, triggerRun, AppStatus, RecheckResult } from "@/lib/api";
 import AppCard from "@/components/AppCard";
 import { RefreshCw, Play } from "lucide-react";
 
@@ -42,6 +42,17 @@ export default function Dashboard() {
     } finally {
       setRunning(false);
     }
+  }
+
+  function handleRecheckDone(result: RecheckResult) {
+    setStatuses(prev =>
+      prev.map(s => s.app_name === result.app_name ? { ...s, ...result } : s)
+    );
+    const msg = result.resolved
+      ? `✅ ${result.app_name} 재점검 후 정상 (${result.response_ms}ms)`
+      : `⚠️ ${result.app_name} 재점검에도 ${result.status} — 실제 장애 확인 필요`;
+    setToast(msg);
+    setTimeout(() => setToast(null), 5000);
   }
 
   const okCount = statuses.filter(s => s.status === "ok").length;
@@ -120,7 +131,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {statuses.map(s => <AppCard key={s.app_name} s={s} />)}
+            {statuses.map(s => <AppCard key={s.app_name} s={s} onRecheckDone={handleRecheckDone} />)}
           </div>
         )}
       </div>

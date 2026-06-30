@@ -2,12 +2,13 @@
 앱관리 에이전트 FastAPI 서버
 
 엔드포인트:
-  GET  /                     — 헬스체크
-  POST /api/run              — 앱 점검 즉시 실행
-  GET  /api/status           — 모든 앱 최신 상태
-  GET  /api/status/{app}     — 특정 앱 최신 상태
-  GET  /api/history/{app}    — 특정 앱 점검 이력 (최근 30건)
-  GET  /api/apps             — 모니터링 앱 목록
+  GET  /                        — 헬스체크
+  POST /api/run                 — 전체 앱 점검 즉시 실행
+  POST /api/recheck/{app_name}  — 단일 앱 재점검 (warm-up ping 포함, 즉시 결과 반환)
+  GET  /api/status              — 모든 앱 최신 상태
+  GET  /api/status/{app}        — 특정 앱 최신 상태
+  GET  /api/history/{app}       — 특정 앱 점검 이력 (최근 30건)
+  GET  /api/apps                — 모니터링 앱 목록
 """
 import asyncio
 import sys
@@ -109,6 +110,60 @@ async def run_now(background_tasks: BackgroundTasks, notify_slack: bool = False)
         return {"status": "already_running", "message": "이미 점검이 실행 중입니다."}
     background_tasks.add_task(_run_checks, notify_slack)
     return {"status": "started", "message": "점검을 시작했습니다. /api/status 로 결과를 확인하세요."}
+
+
+@app.post("/api/recheck/{app_name}")
+async def recheck_one(app_name: str):
+    """단일 앱 재점검. warm-up ping 3회 시도 후 최선 결과를 즉시 반환."""
+    app_cfg = next((a for a in APPS if a.name == app_name), None)
+    if not app_cfg:
+        raise HTTPException(404, f"'{app_name}' 앱을 찾을 수 없습니다.")
+    checker = CHECKER_MAP.get(app_name)
+    if not checker:
+        raise HTTPException(404, f"'{app_name}' 체커가 없습니다.")
+
+    best: CheckResult | None = None
+    attempts = []
+    for i in range(3):
+        try:
+            result = await checker.check(app_cfg)
+        except Exception as e:
+            result = CheckResult(app_name=app_name, status="error")
+            result.errors.append(str(e))
+        attempts.append(result)
+        # 정상이면 더 이상 재시도 불필요
+        if result.status == "ok":
+            best = result
+            break
+        if best is None or (result.response_ms or 9999) < (best.response_ms or 9999):
+            best = result
+
+    assert best is not None
+
+    # 결과 DB 저장
+    save_results([{
+        "app_name": best.app_name,
+        "status": best.status,
+        "response_ms": best.response_ms,
+        "details": best.details,
+        "warnings": best.warnings,
+        "errors": best.errors,
+        "checked_at": best.checked_at,
+    }])
+
+    response_times = [r.response_ms for r in attempts if r.response_ms is not None]
+    return {
+        "app_name": best.app_name,
+        "status": best.status,
+        "response_ms": best.response_ms,
+        "details": best.details,
+        "warnings": best.warnings,
+        "errors": best.errors,
+        "checked_at": best.checked_at,
+        "attempts": len(attempts),
+        "response_times": response_times,
+        "resolved": best.status == "ok",
+    }
 
 
 async def _run_checks(notify_slack: bool = False):
