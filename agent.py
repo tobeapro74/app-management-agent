@@ -17,14 +17,18 @@ if _env.exists():
             k, v = line.split("=", 1)
             import os; os.environ.setdefault(k.strip(), v.strip())
 
-from config import APPS
+from config import APPS, SLACK_WEBHOOK_URL
 from checkers import dart_info, sajunow, yeouido, n2golf, generic
+from checkers import dart_link as dart_link_checker
+from checkers.base import CheckResult
 from reporters.report import build_report
 from reporters.slack import send_slack
+from api.database import init_db, save_results
 
 # 앱 이름 → 체커 모듈 매핑
 CHECKER_MAP = {
-    "Dart Info": dart_info,
+    "Dart Link": dart_link_checker,
+    "Dart Monitor": dart_info,
     "사주나우": sajunow,
     "여의도 한끼": yeouido,
     "N2골프": n2golf,
@@ -37,20 +41,22 @@ CHECKER_MAP = {
 async def run():
     print("=== 앱 점검 시작 ===")
 
+    init_db()
+
     tasks = []
+    apps_with_checker = []
     for app in APPS:
         checker = CHECKER_MAP.get(app.name)
         if checker:
             tasks.append(checker.check(app))
+            apps_with_checker.append(app)
         else:
             print(f"[경고] {app.name} 체커 없음 — 건너뜀")
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # 예외를 CheckResult 에러로 변환
-    from checkers.base import CheckResult
-    final = []
-    for app, result in zip(APPS, results):
+    final: list[CheckResult] = []
+    for app, result in zip(apps_with_checker, results):
         if isinstance(result, Exception):
             r = CheckResult(app_name=app.name, status="error")
             r.errors.append(str(result))
@@ -58,6 +64,22 @@ async def run():
         else:
             final.append(result)
 
+    # DB 저장
+    save_results([
+        {
+            "app_name": r.app_name,
+            "status": r.status,
+            "response_ms": r.response_ms,
+            "details": r.details,
+            "warnings": r.warnings,
+            "errors": r.errors,
+            "checked_at": r.checked_at,
+        }
+        for r in final
+    ])
+    print("[DB] 점검 결과 저장 완료")
+
+    # 슬랙 리포트
     report = build_report(final)
     print("\n" + report)
 
@@ -65,7 +87,6 @@ async def run():
     if sent:
         print("\n[Slack] 리포트 발송 완료")
 
-    # 에러 앱이 있으면 exit code 1
     has_error = any(r.status == "error" for r in final)
     sys.exit(1 if has_error else 0)
 

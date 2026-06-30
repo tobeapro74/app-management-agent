@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 @dataclass
 class AppConfig:
@@ -11,11 +12,20 @@ class AppConfig:
     def health_url(self):
         return f"{self.base_url}{self.health_path}"
 
+    @property
+    def hostname(self) -> str:
+        return urlparse(self.base_url).hostname or ""
+
 
 APPS: list[AppConfig] = [
     AppConfig(
-        name="Dart Info",
-        base_url=os.getenv("DART_INFO_URL", "https://web-production-1e769.up.railway.app"),
+        name="Dart Link",
+        base_url=os.getenv("DART_LINK_URL", "https://api.dart-link.app"),
+        health_path="/health",
+    ),
+    AppConfig(
+        name="Dart Monitor",
+        base_url=os.getenv("DART_MONITOR_URL", "https://api.dart-monitor.com"),
         health_path="/health",
     ),
     AppConfig(

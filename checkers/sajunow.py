@@ -1,10 +1,10 @@
-from .base import CheckResult, ping_health
+from .base import CheckResult, ping_health, check_ssl_expiry
 from config import AppConfig
 
 
 async def check(app: AppConfig) -> CheckResult:
     ok, ms, body = await ping_health(app.health_url)
-    result = CheckResult(app_name=app.name, status="ok", response_ms=ms, details=body)
+    result = CheckResult(app_name=app.name, status="ok", response_ms=ms)
 
     if not ok:
         result.status = "error"
@@ -16,9 +16,21 @@ async def check(app: AppConfig) -> CheckResult:
     if unpublished and unpublished > 0:
         result.status = "warn"
         result.warnings.append(f"develop 브랜치 미배포 커밋 {unpublished}건")
+        result.details["unpublished_commits"] = unpublished
 
     if ms and ms > 3000:
         result.status = "warn"
         result.warnings.append(f"응답 지연: {ms}ms")
+
+    ssl_days = check_ssl_expiry(app.hostname)
+    if ssl_days is not None:
+        result.details["ssl_days"] = ssl_days
+        if ssl_days < 14:
+            result.status = "error"
+            result.errors.append(f"SSL 인증서 만료 {ssl_days}일 남음")
+        elif ssl_days < 30:
+            if result.status == "ok":
+                result.status = "warn"
+            result.warnings.append(f"SSL 인증서 만료 {ssl_days}일 남음")
 
     return result
