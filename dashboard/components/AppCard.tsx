@@ -27,6 +27,7 @@ const DETAIL_LABELS: Record<string, string> = {
   disclosure_found:      "당일공시",
   financial_ok:          "재무수집",
   ai_ok:                 "AI분석",
+  total_documents:       "누적문서",
 };
 
 const MS_MAX = 5000;
@@ -136,14 +137,13 @@ export default function AppCard({
 
       {/* 게이지 행 */}
       {showGaugeRow && (
-        <div className="flex justify-around items-end py-1 border-b border-slate-700/50">
+        <div className="flex justify-around items-end pt-2 pb-2 border-b border-slate-700/50">
           {showMsGauge && (
             <ArcGauge
               value={msToGaugeValue(display.response_ms!)}
               label="응답속도"
               displayValue={`${display.response_ms}ms`}
               thresholds={[60, 80]}
-              size={90}
             />
           )}
           {showSslGauge && (
@@ -153,17 +153,14 @@ export default function AppCard({
               displayValue={`${sslDays}일`}
               thresholds={[34, 16]}
               invert
-              size={90}
             />
           )}
           {showAvailGauge && (
             <ArcGauge
               value={availability!}
               label="7일 가용성"
-              unit="%"
               thresholds={[90, 70]}
               invert
-              size={90}
             />
           )}
         </div>
