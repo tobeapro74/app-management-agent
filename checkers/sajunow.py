@@ -18,6 +18,11 @@ async def check(app: AppConfig) -> CheckResult:
         result.warnings.append(f"develop 브랜치 미배포 커밋 {unpublished}건")
         result.details["unpublished_commits"] = unpublished
 
+    # 회원 지표
+    for key in ("total_members", "dau_yesterday", "new_members_yesterday", "wau_yesterday", "mau_yesterday"):
+        if body.get(key) is not None:
+            result.details[key] = body[key]
+
     if ms and ms > 3000:
         result.status = "warn"
         result.warnings.append(f"응답 지연: {ms}ms")

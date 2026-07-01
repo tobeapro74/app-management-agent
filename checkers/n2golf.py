@@ -21,6 +21,11 @@ async def check(app: AppConfig) -> CheckResult:
     if monthly_bookings is not None:
         result.details["monthly_bookings"] = monthly_bookings
 
+    # 회원 지표
+    for key in ("total_members", "dau_yesterday", "new_members_yesterday", "wau_yesterday", "mau_yesterday"):
+        if body.get(key) is not None:
+            result.details[key] = body[key]
+
     if ms and ms > 3000:
         result.status = "warn"
         result.warnings.append(f"응답 지연: {ms}ms")
