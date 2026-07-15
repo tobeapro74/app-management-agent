@@ -3,12 +3,17 @@
 
 엔드포인트:
   GET  /                        — 헬스체크
-  POST /api/run                 — 전체 앱 점검 즉시 실행
+  POST /api/run                 — 전체 앱 점검 즉시 실행 (morning 모드)
+  POST /api/run/evening         — Dart Link 데이터 수신 결과 체크 (evening 모드)
   POST /api/recheck/{app_name}  — 단일 앱 재점검 (warm-up ping 포함, 즉시 결과 반환)
   GET  /api/status              — 모든 앱 최신 상태
   GET  /api/status/{app}        — 특정 앱 최신 상태
   GET  /api/history/{app}       — 특정 앱 점검 이력 (최근 30건)
   GET  /api/apps                — 모니터링 앱 목록
+
+스케줄 (APScheduler):
+  09:00 KST — 전체 앱 점검 (morning)
+  18:00 KST — Dart Link 데이터 수신 결과 체크 (evening)
 """
 import asyncio
 import sys
@@ -69,6 +74,43 @@ _running = False
 @app.on_event("startup")
 def on_startup():
     init_db()
+    _start_scheduler()
+
+
+def _start_scheduler():
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz
+
+        scheduler = AsyncIOScheduler(timezone=pytz.utc)
+
+        # 매일 00:00 UTC = 09:00 KST — 전체 앱 점검
+        scheduler.add_job(
+            lambda: asyncio.create_task(_run_checks(notify_slack=True)),
+            trigger=CronTrigger(hour=0, minute=0, timezone=pytz.utc),
+            id="morning_check",
+            name="전체 앱 점검 (09:00 KST)",
+            replace_existing=True,
+            misfire_grace_time=1800,
+        )
+        # 매일 09:00 UTC = 18:00 KST — Dart Link 데이터 수신 결과 체크
+        scheduler.add_job(
+            lambda: asyncio.create_task(_run_evening_check()),
+            trigger=CronTrigger(hour=9, minute=0, timezone=pytz.utc),
+            id="evening_data_check",
+            name="데이터 수신 결과 체크 (18:00 KST)",
+            replace_existing=True,
+            misfire_grace_time=1800,
+        )
+        scheduler.start()
+        import logging
+        logging.getLogger(__name__).info(
+            "[스케줄러] 등록 완료 — 전체점검(09:00 KST) / 데이터수신체크(18:00 KST)"
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[스케줄러] 등록 실패: {e}")
 
 
 @app.get("/")
@@ -118,6 +160,13 @@ async def run_now(background_tasks: BackgroundTasks, notify_slack: bool = False)
         return {"status": "already_running", "message": "이미 점검이 실행 중입니다."}
     background_tasks.add_task(_run_checks, notify_slack)
     return {"status": "started", "message": "점검을 시작했습니다. /api/status 로 결과를 확인하세요."}
+
+
+@app.post("/api/run/evening")
+async def run_evening(background_tasks: BackgroundTasks):
+    """Dart Link 데이터 수신 결과 체크 (18:00 KST 스케줄 or 수동 트리거)."""
+    background_tasks.add_task(_run_evening_check)
+    return {"status": "started", "message": "데이터 수신 결과 체크를 시작했습니다."}
 
 
 @app.post("/api/recheck/{app_name}")
@@ -218,6 +267,44 @@ async def _run_checks(notify_slack: bool = False):
         _running = False
 
 
+async def _run_evening_check():
+    """18:00 KST — Dart Link DART 공시 + NPS 임직원 데이터 수신 결과 체크."""
+    from reporters.slack import send_slack
+    from reporters.gmail import send_html_report
+    from reporters.report import build_report, build_html_report
+
+    dart_link_app = next((a for a in APPS if a.name == "Dart Link"), None)
+    if not dart_link_app:
+        return
+
+    try:
+        result = await dart_link_checker.check(dart_link_app, mode="evening")
+    except Exception as e:
+        result = CheckResult(app_name="Dart Link", status="error")
+        result.errors.append(str(e))
+
+    save_results([{
+        "app_name": result.app_name,
+        "status": result.status,
+        "response_ms": result.response_ms,
+        "details": result.details,
+        "warnings": result.warnings,
+        "errors": result.errors,
+        "checked_at": result.checked_at,
+    }])
+
+    has_error = result.status == "error"
+    has_warn = result.status == "warn"
+    prefix = "🚨 [오류]" if has_error else ("⚠️ [경고]" if has_warn else "✅ [정상]")
+    now_str = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+    subject = f"{prefix} Dart Link 데이터 수신 결과 — {now_str}"
+
+    report = build_report([result])
+    await send_slack(report)
+    html = build_html_report([result])
+    send_html_report(subject, html)
+
+
 # ── Dart Monitor ops 엔드포인트 ──────────────────────────────────────────────
 
 DM_DB_URL = os.environ.get(
@@ -228,10 +315,19 @@ DM_API = "https://api.dart-monitor.com"
 KST = timezone(timedelta(hours=9))
 
 
+def _dm_connect():
+    import psycopg2
+    # connect_timeout: TCP 연결 타임아웃(초), options: statement_timeout으로 쿼리 타임아웃
+    return psycopg2.connect(
+        DM_DB_URL,
+        connect_timeout=8,
+        options="-c statement_timeout=10000",
+    )
+
+
 def _dm_scalar(sql: str, params=None):
     try:
-        import psycopg2
-        con = psycopg2.connect(DM_DB_URL)
+        con = _dm_connect()
         cur = con.cursor()
         cur.execute(sql, params) if params else cur.execute(sql)
         row = cur.fetchone()
@@ -243,8 +339,7 @@ def _dm_scalar(sql: str, params=None):
 
 def _dm_rows(sql: str, params=None):
     try:
-        import psycopg2
-        con = psycopg2.connect(DM_DB_URL)
+        con = _dm_connect()
         cur = con.cursor()
         cur.execute(sql, params) if params else cur.execute(sql)
         rows = cur.fetchall()
