@@ -26,7 +26,7 @@ async def check(app: AppConfig) -> CheckResult:
         if body.get(key) is not None:
             result.details[key] = body[key]
 
-    if ms and ms > 3000:
+    if ms and ms > 2000:  # 테스트: 임시 2000ms 임계값
         result.status = "warn"
         result.warnings.append(f"응답 지연: {ms}ms")
 
