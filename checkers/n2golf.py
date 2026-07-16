@@ -30,10 +30,6 @@ async def check(app: AppConfig) -> CheckResult:
         result.status = "warn"
         result.warnings.append(f"응답 지연: {ms}ms")
 
-    # 테스트용 강제 경고 (AI수정지시 버튼 테스트 후 제거)
-    result.status = "warn"
-    result.warnings.append("테스트 경고: AI 수정 지시 버튼 동작 확인 중")
-
     ssl_days = check_ssl_expiry(app.hostname)
     if ssl_days is not None:
         result.details["ssl_days"] = ssl_days
