@@ -1,13 +1,25 @@
 "use client";
 
+/**
+ * 반원 게이지 — circle + clip-path + stroke-dashoffset 방식
+ *
+ * arc path를 일절 사용하지 않아 방향 버그가 원천 차단됨.
+ *
+ * 구조:
+ *   viewBox="0 0 120 64"
+ *   circle cx=60 cy=60 r=50  → clip-path로 위 절반만 표시
+ *   원 둘레 = 2π×50 ≈ 314
+ *   반원 = 절반 = 157
+ *   rotate(-180deg, 60 60) → 왼쪽(9시)에서 시작해 오른쪽(3시)으로 채움
+ *   strokeDashoffset = 157 × (1 - ratio)
+ */
+
 interface Props {
-  value: number;
+  value: number;          // 0~100
   label: string;
-  unit?: string;
   displayValue?: string;
   thresholds?: [number, number];
   invert?: boolean;
-  size?: number;
 }
 
 function getColor(v: number, [warn, danger]: [number, number], invert: boolean): string {
@@ -18,114 +30,76 @@ function getColor(v: number, [warn, danger]: [number, number], invert: boolean):
     if (v <= danger) return "#ef4444";
     if (v <= warn)   return "#f59e0b";
   }
-  return "#10b981";
+  return "#22c55e";
 }
+
+const R    = 50;
+const CIRC = 2 * Math.PI * R;   // ≈ 314.16
+const HALF = CIRC / 2;          // ≈ 157.08  (반원 길이)
 
 export default function ArcGauge({
   value,
   label,
-  unit = "%",
   displayValue,
   thresholds = [70, 90],
   invert = false,
-  size = 100,
 }: Props) {
   const clamped = Math.min(100, Math.max(0, value));
   const color   = getColor(clamped, thresholds, invert);
 
-  const W   = size;
-  const r   = W * 0.36;
-  const sw  = W * 0.10;
-  const pad = sw / 2 + 2;
+  // 반원 기준 offset: 0% → 157(빔), 100% → 0(꽉 참)
+  const offset = HALF * (1 - clamped / 100);
 
-  const cx  = W / 2;
-  const cy  = r + pad;
-
-  const textH = W * 0.22;
-  const H     = cy + pad + textH;
-
-  function pt(deg: number) {
-    const rad = (deg * Math.PI) / 180;
-    return { x: cx + r * Math.cos(rad), y: cy - r * Math.sin(rad) };
-  }
-
-  const left  = pt(180);
-  const right = pt(0);
-
-  const fillDeg  = 180 - (clamped / 100) * 180;
-  const fillPt   = pt(fillDeg);
-  const largeArc = clamped > 50 ? 1 : 0;
-
-  const trackPath = `M ${left.x} ${left.y} A ${r} ${r} 0 1 0 ${right.x} ${right.y}`;
-  const fillPath  = clamped === 0
-    ? null
-    : `M ${left.x} ${left.y} A ${r} ${r} 0 ${largeArc} 0 ${fillPt.x} ${fillPt.y}`;
-
-  // 멀티컬러 그라데이션 ID (size 기반으로 unique)
-  const gradId = `arc-grad-${size}-${label.replace(/\s/g, "")}`;
-
-  const shown = displayValue ?? `${Math.round(clamped)}${unit}`;
+  const shown = displayValue ?? `${Math.round(clamped)}%`;
 
   return (
-    <div className="flex flex-col items-center gap-0 select-none">
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} overflow="visible">
+    <div className="flex flex-col items-center select-none w-full">
+      <span className="text-[10px] text-slate-500 tracking-wider uppercase mb-0.5">
+        {label}
+      </span>
+      <svg viewBox="0 0 120 64" className="w-full" style={{ maxWidth: 110 }}>
         <defs>
-          {/* 멀티컬러 그라데이션 트랙 */}
-          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
-            {invert ? (
-              <>
-                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
-                <stop offset="40%" stopColor="#f59e0b" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0.35" />
-              </>
-            ) : (
-              <>
-                <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
-                <stop offset="55%" stopColor="#f59e0b" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#ef4444" stopOpacity="0.35" />
-              </>
-            )}
-          </linearGradient>
+          {/* 위쪽 절반만 보여주는 clip */}
+          <clipPath id={`half-${label.replace(/\s/g, "")}`}>
+            <rect x="0" y="0" width="120" height="62" />
+          </clipPath>
         </defs>
 
-        {/* 어두운 원형 내부 배경 */}
-        <circle cx={cx} cy={cy} r={r - sw * 0.1} fill="rgba(0,0,0,0.25)" />
-
-        {/* 배경 트랙 — 멀티컬러 */}
-        <path
-          d={trackPath}
+        {/* 배경 원 (회색 트랙) */}
+        <circle
+          cx="60" cy="60" r={R}
           fill="none"
-          stroke={`url(#${gradId})`}
-          strokeWidth={sw}
-          strokeLinecap="round"
+          stroke="#1e293b"
+          strokeWidth="10"
+          clipPath={`url(#half-${label.replace(/\s/g, "")})`}
         />
-        {/* 채움 — 단색 (상태 색상) */}
-        {fillPath && (
-          <path
-            d={fillPath}
-            fill="none"
-            stroke={color}
-            strokeWidth={sw}
-            strokeLinecap="round"
-            style={{ transition: "stroke 0.5s ease, d 0.5s ease" }}
-          />
-        )}
+
+        {/* 채움 원: rotate(-180deg)로 왼쪽(9시)에서 시작 */}
+        <circle
+          cx="60" cy="60" r={R}
+          fill="none"
+          stroke={color}
+          strokeWidth="10"
+          strokeLinecap="round"
+          clipPath={`url(#half-${label.replace(/\s/g, "")})`}
+          strokeDasharray={`${HALF} ${CIRC}`}
+          strokeDashoffset={offset}
+          transform="rotate(-180 60 60)"
+          style={{ transition: "stroke-dashoffset 0.4s ease-out, stroke 0.2s ease-out" }}
+        />
+
         {/* 값 텍스트 */}
         <text
-          x={cx}
-          y={cy + pad + textH * 0.55}
+          x="60" y="50"
           textAnchor="middle"
-          fontSize={W * 0.16}
+          fontSize="14"
           fontWeight="700"
           fill={color}
-          fontFamily="var(--font-geist-mono, monospace)"
+          fontFamily="monospace"
         >
           {shown}
         </text>
       </svg>
-      <span className="text-[10px] text-slate-400 leading-tight text-center mt-0.5 font-medium tracking-wide uppercase">
-        {label}
-      </span>
     </div>
   );
 }

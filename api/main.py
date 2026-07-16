@@ -6,6 +6,7 @@
   POST /api/run                 — 전체 앱 점검 즉시 실행 (morning 모드)
   POST /api/run/evening         — Dart Link 데이터 수신 결과 체크 (evening 모드)
   POST /api/recheck/{app_name}  — 단일 앱 재점검 (warm-up ping 포함, 즉시 결과 반환)
+  POST /api/trigger-fix          — CCR AI 수정 에이전트 트리거 (앱명 + 문제 설명 전달)
   GET  /api/status              — 모든 앱 최신 상태
   GET  /api/status/{app}        — 특정 앱 최신 상태
   GET  /api/history/{app}       — 특정 앱 점검 이력 (최근 30건)
@@ -167,6 +168,65 @@ async def run_evening(background_tasks: BackgroundTasks):
     """Dart Link 데이터 수신 결과 체크 (18:00 KST 스케줄 or 수동 트리거)."""
     background_tasks.add_task(_run_evening_check)
     return {"status": "started", "message": "데이터 수신 결과 체크를 시작했습니다."}
+
+
+@app.post("/api/trigger-fix")
+async def trigger_fix(body: dict):
+    """CCR 자동 수정 에이전트 트리거 — Anthropic API로 루틴 실행 요청."""
+    import httpx
+    app_name = body.get("app_name", "")
+    issue    = body.get("issue", "")
+    ccr_key  = os.environ.get("CCR_API_KEY", "")
+    if not ccr_key:
+        raise HTTPException(500, "CCR_API_KEY 미설정")
+
+    routine_id = "trig_01C772TqVzW9ZgzVutGq3Eh4"
+    prompt = (
+        f"앱관리 에이전트: '{app_name}' 앱에 다음 문제가 감지됐습니다.\n\n"
+        f"문제: {issue}\n\n"
+        f"해당 앱 레포를 확인하고 문제를 진단 및 수정하세요. "
+        f"수정 후 배포까지 완료하고, 결과를 Slack으로 보고하세요."
+    )
+
+    import uuid
+    payload = {
+        "job_config": {
+            "ccr": {
+                "environment_id": "env_01HpZahSCUfZEC99HG8jA79g",
+                "session_context": {
+                    "model": "claude-sonnet-4-6",
+                    "sources": [
+                        {"git_repository": {"url": "https://github.com/tobeapro74/app-management-agent"}}
+                    ],
+                    "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+                },
+                "events": [
+                    {"data": {
+                        "uuid": str(uuid.uuid4()),
+                        "session_id": "",
+                        "type": "user",
+                        "parent_tool_use_id": None,
+                        "message": {"content": prompt, "role": "user"}
+                    }}
+                ]
+            }
+        }
+    }
+
+    headers = {
+        "x-api-key": ccr_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"https://api.anthropic.com/v1/code_routines/triggers/{routine_id}/run",
+            json=payload,
+            headers=headers,
+        )
+    if r.status_code not in (200, 202):
+        raise HTTPException(502, f"CCR 트리거 실패: {r.status_code} {r.text[:200]}")
+    return {"status": "triggered", "message": f"'{app_name}' AI 수정 에이전트를 실행했습니다. 약 2~5분 후 Slack에서 결과를 확인하세요."}
 
 
 @app.post("/api/recheck/{app_name}")

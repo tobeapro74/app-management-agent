@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/byungchulpark/앱개발_2026/N2골프_자금관리/config/**)"
+    ]
+  }
+}

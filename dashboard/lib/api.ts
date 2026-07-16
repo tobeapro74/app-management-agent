@@ -67,3 +67,13 @@ export async function recheckApp(appName: string): Promise<RecheckResult> {
   if (!res.ok) throw new Error(`recheck failed: ${res.status}`);
   return res.json();
 }
+
+export async function triggerFix(appName: string, issue: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/trigger-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_name: appName, issue }),
+  });
+  if (!res.ok) throw new Error(`trigger-fix failed: ${res.status}`);
+  return res.json();
+}

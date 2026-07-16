@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AppStatus, RecheckResult, recheckApp, fetchHistory } from "@/lib/api";
-import { CheckCircle, AlertTriangle, XCircle, RefreshCw, Copy } from "lucide-react";
+import Link from "next/link";
+import { AppStatus, RecheckResult, recheckApp, fetchHistory, triggerFix } from "@/lib/api";
+import { CheckCircle, AlertTriangle, XCircle, RefreshCw, Copy, ExternalLink, Wrench } from "lucide-react";
 import ArcGauge from "./ArcGauge";
 import Sparkline from "./Sparkline";
 
@@ -62,6 +63,8 @@ export default function AppCard({
   const [recheckResult, setRecheckResult] = useState<RecheckResult | null>(null);
   const [copied, setCopied]               = useState(false);
   const [sparkData, setSparkData]         = useState<number[]>([]);
+  const [fixing, setFixing]               = useState(false);
+  const [fixMsg, setFixMsg]               = useState<string | null>(null);
 
   // 스파크라인 데이터 로드 (최근 20건 응답속도)
   useEffect(() => {
@@ -79,14 +82,38 @@ export default function AppCard({
   const Icon     = cfg.icon;
   const sslDays  = display.details?.ssl_days as number | undefined;
   const checkedAt = display.checked_at
-    ? new Date(display.checked_at).toLocaleString("ko-KR", {
-        timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit"
-      })
+    ? (() => {
+        const raw = display.checked_at;
+        // Railway가 timezone 없이 UTC 시각을 저장하므로 'Z'가 없으면 붙여서 UTC로 강제 파싱
+        const iso = raw.includes("T") ? raw : raw.replace(" ", "T");
+        const dt = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+        return dt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" });
+      })()
     : "-";
 
-  const metricEntries = Object.entries(display.details ?? {}).filter(
-    ([k]) => k !== "ssl_days" && k !== "companies" && k !== "disclosure_date" && DETAIL_LABELS[k]
-  );
+  const d = display.details ?? {};
+
+  function fmt(v: unknown): string {
+    if (v == null) return "—";
+    return (v as number).toLocaleString("ko-KR");
+  }
+
+  // 공통 지표 (모든 앱 고정 표시)
+  const commonMetrics: [string, string][] = [
+    ["누적회원", d.total_members != null ? fmt(d.total_members) : d.total_documents != null ? fmt(d.total_documents) : "—"],
+    ["전일DAU",  fmt(d.dau_yesterday)],
+    ["신규가입",  fmt(d.new_members_yesterday)],
+  ];
+
+  // 앱별 추가 지표 (1개만)
+  const APP_EXTRA: Record<string, [string, string]> = {
+    "N2골프":      ["월예약",   fmt(d.monthly_bookings)],
+    "여의도 한끼":  ["맛집수",   fmt(d.restaurant_count)],
+    "Dart Link":   ["당일공시",  fmt(d.disclosure_found)],
+    "Dart Monitor":["공시누적",  fmt(d.disclosures_total)],
+    "makedocu":    ["전일문서",  fmt(d.dau_yesterday)],
+  };
+  const extraMetric = APP_EXTRA[s.app_name] ?? null;
 
   const needsAction = hasSlowResponse(s) || hasHealthError(s) || hasSslWarning(s);
   const showMsGauge    = display.response_ms != null;
@@ -111,6 +138,23 @@ export default function AppCard({
     navigator.clipboard.writeText(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleFix() {
+    setFixing(true);
+    setFixMsg(null);
+    const issues = [
+      ...display.errors,
+      ...display.warnings,
+    ].join("; ") || `상태: ${display.status}`;
+    try {
+      const res = await triggerFix(s.app_name, issues);
+      setFixMsg(res.message);
+    } catch {
+      setFixMsg("⚠️ AI 수정 에이전트 트리거 실패");
+    } finally {
+      setFixing(false);
+    }
   }
 
   return (
@@ -167,12 +211,23 @@ export default function AppCard({
       )}
 
       {/* 스파크라인 */}
-      {sparkData.length >= 3 && (
+      {sparkData.length >= 3 && (() => {
+        const avg = Math.round(sparkData.reduce((a, b) => a + b, 0) / sparkData.length);
+        const current = display.response_ms ?? 0;
+        const isSlow = current > 3000;
+        const isColdStart = isSlow && avg < 1500 && current > avg * 2;
+        const diagBadge = isColdStart
+          ? { text: "❄️ 콜드 스타트 의심", cls: "text-sky-400 bg-sky-900/30 border-sky-500/30" }
+          : isSlow
+          ? { text: "⚡ 응답 지연", cls: "text-amber-400 bg-amber-900/30 border-amber-500/30" }
+          : null;
+
+        return (
         <div className="flex flex-col gap-0.5 px-0.5">
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-[10px] text-slate-500 uppercase tracking-wide">응답속도 추이</span>
             <span className="text-[10px] font-mono text-slate-500">
-              avg {Math.round(sparkData.reduce((a, b) => a + b, 0) / sparkData.length)}ms
+              avg {avg}ms
             </span>
           </div>
           <Sparkline
@@ -181,8 +236,14 @@ export default function AppCard({
             height={36}
             color={sparkColor(display.status)}
           />
+          {diagBadge && (
+            <span className={`mt-1 self-start text-[10px] font-medium px-2 py-0.5 rounded-full border ${diagBadge.cls}`}>
+              {diagBadge.text}
+            </span>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* 경고/에러 메시지 */}
       {display.warnings.length > 0 && (
@@ -214,17 +275,21 @@ export default function AppCard({
         </div>
       )}
 
-      {/* 핵심 지표 */}
-      {metricEntries.length > 0 && (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs border-t border-slate-700/50 pt-2">
-          {metricEntries.map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-1">
-              <dt className="text-slate-500">{DETAIL_LABELS[k] ?? k}</dt>
-              <dd className="font-medium text-slate-300 truncate tabular-nums">{String(v)}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {/* 핵심 지표 — 고정 레이아웃 */}
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs border-t border-slate-700/50 pt-2">
+        {commonMetrics.map(([label, val]) => (
+          <div key={label} className="flex justify-between gap-1">
+            <dt className="text-slate-500">{label}</dt>
+            <dd className={`font-medium tabular-nums ${val === "—" ? "text-slate-600" : "text-slate-300"}`}>{val}</dd>
+          </div>
+        ))}
+        {extraMetric && (
+          <div className="flex justify-between gap-1">
+            <dt className="text-slate-500">{extraMetric[0]}</dt>
+            <dd className={`font-medium tabular-nums ${extraMetric[1] === "—" ? "text-slate-600" : "text-slate-300"}`}>{extraMetric[1]}</dd>
+          </div>
+        )}
+      </dl>
 
       {/* 조치 버튼 */}
       {needsAction && (
@@ -248,7 +313,33 @@ export default function AppCard({
               {copied ? "복사됨 ✓" : "SSL 갱신 가이드"}
             </button>
           )}
+          <button
+            onClick={handleFix}
+            disabled={fixing}
+            className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-violet-800 border border-violet-600 hover:bg-violet-700 text-violet-100 disabled:opacity-50 font-medium transition-colors"
+          >
+            <Wrench className={`w-3.5 h-3.5 ${fixing ? "animate-spin" : ""}`} />
+            {fixing ? "AI 수정 지시 중…" : "AI 수정 지시"}
+          </button>
         </div>
+      )}
+
+      {/* AI 수정 지시 결과 배너 */}
+      {fixMsg && (
+        <div className="text-xs rounded-lg px-3 py-2 font-medium border bg-violet-900/30 text-violet-300 border-violet-500/30">
+          🤖 {fixMsg}
+        </div>
+      )}
+
+      {/* 상세 페이지 링크 (지원 앱만) */}
+      {(s.app_name === "Dart Link" || s.app_name === "Dart Monitor") && (
+        <Link
+          href={s.app_name === "Dart Link" ? "/dart-link" : "/dart-monitor"}
+          className="flex items-center gap-1 text-[11px] text-sky-500 hover:text-sky-400 transition-colors mt-1"
+        >
+          <ExternalLink className="w-3 h-3" />
+          상세 모니터링
+        </Link>
       )}
 
       {/* 점검 시각 */}
