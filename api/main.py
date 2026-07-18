@@ -23,8 +23,9 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # 프로젝트 루트를 sys.path에 추가
 _root = Path(__file__).parent.parent
@@ -154,6 +155,62 @@ def availability(days: int = 7):
     return get_availability(days)
 
 
+@app.post("/slack/command")
+async def slack_command(
+    background_tasks: BackgroundTasks,
+    command: str = Form(...),
+    text: str = Form(default=""),
+    user_name: str = Form(default=""),
+):
+    """Slack Slash Command 수신 — /점검, /수정 처리."""
+    if command in ("/점검", "/check"):
+        background_tasks.add_task(_run_checks, notify_slack=True)
+        return JSONResponse({"response_type": "in_channel", "text": f"🔍 *{user_name}* 님이 즉시 점검을 시작했습니다. 약 15초 후 결과가 발송됩니다."})
+
+    if command in ("/수정", "/fix"):
+        routine_id = "trig_01C772TqVzW9ZgzVutGq3Eh4"
+        ccr_key = os.environ.get("CCR_API_KEY", "")
+        if not ccr_key:
+            return JSONResponse({"response_type": "ephemeral", "text": "⚠️ CCR_API_KEY 미설정 — Railway 환경변수를 확인하세요."})
+        import httpx, uuid
+        payload = {
+            "job_config": {
+                "ccr": {
+                    "environment_id": "env_01HpZahSCUfZEC99HG8jA79g",
+                    "session_context": {
+                        "model": "claude-sonnet-4-6",
+                        "sources": [
+                            {"git_repository": {"url": "https://github.com/tobeapro74/app-management-agent"}},
+                            {"git_repository": {"url": "https://github.com/tobeapro74/saju-now"}},
+                            {"git_repository": {"url": "https://github.com/tobeapro74/yeouido-food-nextjs"}},
+                            {"git_repository": {"url": "https://github.com/tobeapro74/n2golf"}},
+                        ],
+                        "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+                    },
+                    "events": [{"data": {
+                        "uuid": str(uuid.uuid4()),
+                        "session_id": "", "type": "user", "parent_tool_use_id": None,
+                        "message": {"content": f"앱 자동 수정 에이전트: {text or '전체 점검 후 문제 있는 앱 수정'}. 수정 완료 후 Slack으로 결과를 보고하세요.", "role": "user"},
+                    }}],
+                }
+            }
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(
+                    f"https://api.claude.ai/v1/code/triggers/{routine_id}/run",
+                    json={}, headers={"x-api-key": ccr_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                )
+            if r.status_code in (200, 202):
+                return JSONResponse({"response_type": "in_channel", "text": f"🤖 *{user_name}* 님의 요청으로 AI 수정 에이전트를 실행했습니다. 2~5분 후 결과를 보고합니다."})
+            else:
+                return JSONResponse({"response_type": "ephemeral", "text": f"⚠️ CCR 트리거 실패: {r.status_code}"})
+        except Exception as e:
+            return JSONResponse({"response_type": "ephemeral", "text": f"⚠️ 오류: {e}"})
+
+    return JSONResponse({"response_type": "ephemeral", "text": f"알 수 없는 커맨드: {command}. /점검 또는 /수정 을 사용하세요."})
+
+
 @app.post("/api/run")
 async def run_now(background_tasks: BackgroundTasks, notify_slack: bool = False):
     global _running
@@ -220,7 +277,7 @@ async def trigger_fix(body: dict):
     }
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
-            f"https://api.anthropic.com/v1/code_routines/triggers/{routine_id}/run",
+            f"https://api.claude.ai/v1/code/triggers/{routine_id}/run",
             json=payload,
             headers=headers,
         )
