@@ -168,45 +168,30 @@ async def slack_command(
         return JSONResponse({"response_type": "in_channel", "text": f"🔍 *{user_name}* 님이 즉시 점검을 시작했습니다. 약 15초 후 결과가 발송됩니다."})
 
     if command in ("/수정", "/fix"):
-        routine_id = "trig_01C772TqVzW9ZgzVutGq3Eh4"
-        ccr_key = os.environ.get("CCR_API_KEY", "")
-        if not ccr_key:
-            return JSONResponse({"response_type": "ephemeral", "text": "⚠️ CCR_API_KEY 미설정 — Railway 환경변수를 확인하세요."})
-        import httpx, uuid
-        payload = {
-            "job_config": {
-                "ccr": {
-                    "environment_id": "env_01HpZahSCUfZEC99HG8jA79g",
-                    "session_context": {
-                        "model": "claude-sonnet-4-6",
-                        "sources": [
-                            {"git_repository": {"url": "https://github.com/tobeapro74/app-management-agent"}},
-                            {"git_repository": {"url": "https://github.com/tobeapro74/saju-now"}},
-                            {"git_repository": {"url": "https://github.com/tobeapro74/yeouido-food-nextjs"}},
-                            {"git_repository": {"url": "https://github.com/tobeapro74/n2golf"}},
-                        ],
-                        "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
-                    },
-                    "events": [{"data": {
-                        "uuid": str(uuid.uuid4()),
-                        "session_id": "", "type": "user", "parent_tool_use_id": None,
-                        "message": {"content": f"앱 자동 수정 에이전트: {text or '전체 점검 후 문제 있는 앱 수정'}. 수정 완료 후 Slack으로 결과를 보고하세요.", "role": "user"},
-                    }}],
-                }
-            }
-        }
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.post(
-                    f"https://api.claude.ai/v1/code/triggers/{routine_id}/run",
-                    json={}, headers={"x-api-key": ccr_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                )
-            if r.status_code in (200, 202):
-                return JSONResponse({"response_type": "in_channel", "text": f"🤖 *{user_name}* 님의 요청으로 AI 수정 에이전트를 실행했습니다. 2~5분 후 결과를 보고합니다."})
-            else:
-                return JSONResponse({"response_type": "ephemeral", "text": f"⚠️ CCR 트리거 실패: {r.status_code}"})
-        except Exception as e:
-            return JSONResponse({"response_type": "ephemeral", "text": f"⚠️ 오류: {e}"})
+        import httpx
+        webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+        issue_desc = text or "문제 앱 수정 요청"
+        msg = (
+            f"🔧 *AI 수정 지시 요청*\n"
+            f"*요청자:* {user_name}\n"
+            f"*내용:* {issue_desc}\n\n"
+            f"> claude.ai/code/routines 에서 CCR 루틴을 직접 실행하거나,\n"
+            f"> 대시보드의 *AI 수정 지시* 버튼을 사용하세요."
+        )
+        if webhook_url:
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(webhook_url, json={"text": msg})
+            except Exception:
+                pass
+        return JSONResponse({
+            "response_type": "in_channel",
+            "text": (
+                f"🔧 *{user_name}* 님의 수정 요청을 접수했습니다.\n"
+                f"*내용:* {issue_desc}\n\n"
+                f"> CCR 루틴을 실행하려면 <https://claude.ai/code/routines|claude.ai/code/routines>에서 직접 트리거하세요."
+            ),
+        })
 
     return JSONResponse({"response_type": "ephemeral", "text": f"알 수 없는 커맨드: {command}. /점검 또는 /수정 을 사용하세요."})
 
