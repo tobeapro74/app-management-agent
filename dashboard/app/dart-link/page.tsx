@@ -108,7 +108,7 @@ export default function DartLinkDetail() {
   async function load() {
     setLoading(true);
     try {
-      const DART_API = "https://api.dart-link.app";
+      const DART_API = "https://api.dartlinkpro.com";
       const today = new Date(Date.now() + 9 * 60 * 60 * 1000);
       const todayStr = today.toISOString().slice(0, 10).replace(/-/g, "");
 
