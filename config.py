@@ -20,7 +20,7 @@ class AppConfig:
 APPS: list[AppConfig] = [
     AppConfig(
         name="Dart Link",
-        base_url=os.getenv("DART_LINK_URL", "https://api.dart-link.app"),
+        base_url=os.getenv("DART_LINK_URL", "https://api.dartlinkpro.com"),
         health_path="/health",
     ),
     AppConfig(

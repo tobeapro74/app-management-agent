@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from .base import CheckResult, ping_health, check_ssl_expiry
 from config import AppConfig
 
-DART_LINK_API = "https://api.dart-link.app"
+DART_LINK_API = "https://api.dartlinkpro.com"
 KST = timezone(timedelta(hours=9))
 
 
