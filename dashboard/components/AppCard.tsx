@@ -115,7 +115,8 @@ export default function AppCard({
   };
   const extraMetric = APP_EXTRA[s.app_name] ?? null;
 
-  const needsAction = hasSlowResponse(s) || hasHealthError(s) || hasSslWarning(s);
+  const needsAction = hasSlowResponse(s) || hasHealthError(s) || hasSslWarning(s)
+    || display.warnings.length > 0 || display.errors.length > 0;
   const showMsGauge    = display.response_ms != null;
   const showSslGauge   = sslDays != null;
   const showAvailGauge = availability != null;

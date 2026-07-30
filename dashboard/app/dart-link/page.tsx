@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { API_BASE } from "@/lib/api";
 import {
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle,
-  Database, Cpu, Shield, BarChart2, Building2, Users, Eye,
-  Phone, FileText, TrendingUp, Star,
+  Database, Shield, BarChart2, Users, Eye,
+  Phone, FileText, TrendingUp,
 } from "lucide-react";
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
@@ -218,6 +218,12 @@ export default function DartLinkDetail() {
                 {refreshedAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })} 기준
               </span>
             )}
+            <button
+              onClick={() => router.push("/dart-link/admin")}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-sky-700 bg-sky-900/40 hover:bg-sky-800/60 text-sky-300 transition-colors"
+            >
+              관리자 대시보드
+            </button>
             <button
               onClick={load}
               disabled={loading}
